@@ -29,6 +29,7 @@ var (
 
 type IssueCloseInfo struct {
 	Close   bool   `json:"close"`
+	Lock    bool   `json:"lock"`
 	Content string `json:"content"`
 }
 
@@ -53,39 +54,33 @@ func main() {
 请特别关注 "Verify steps" 部分，并判断用户填写的内容是否满足了这些步骤的要求。如果不满足，请提供一个 JSON 格式的回答，说明关闭该 issue 的理由。`, issue.GetTitle(), issue.GetBody())
 
 		content1, err := chat(c, "gpt-4o-mini")
+		log.Println(content1)
 		if err != nil {
 			log.Println(err)
 		}
-		gpt, err := parse(content1)
-		if err != nil {
-			log.Println(err)
-		}
-
-		content2, err := chat(c, "gemini-1.5-flash")
-		if err != nil {
-			log.Println(err)
-		}
-		gemini, err := parse(content2)
+		gpt4omini, err := parse(content1)
 		if err != nil {
 			log.Println(err)
 		}
 
-		content3, err := chat(c, "claude-3-5-sonnet-20240620")
+		content2, err := chat(c, "gpt-4o")
+		log.Println(content2)
 		if err != nil {
 			log.Println(err)
 		}
-		claude, err := parse(content3)
+		gpt4o, err := parse(content2)
 		if err != nil {
 			log.Println(err)
 		}
 
-		fmt.Println(gpt,
-			gemini,
-			claude)
+		fmt.Println(gpt4omini)
+		fmt.Println(gpt4o)
 
-		if gpt.Close && gemini.Close && claude.Close {
-			closeIssue(issue, claude.Content)
-			// fmt.Println("close issue")
+		if gpt4omini.Close && gpt4o.Close {
+			closeIssue(issue, gpt4o.Content)
+		}
+		if gpt4omini.Lock && gpt4o.Lock {
+			lockIssue(issue)
 		}
 	}
 
@@ -129,6 +124,18 @@ func closeIssue(issue *github.Issue, s string) {
 	}
 
 	fmt.Printf("Closed issue #%d\n", issueNumber)
+}
+
+func lockIssue(issue *github.Issue) {
+	issueNumber := issue.GetNumber()
+
+	_, err := client.Issues.Lock(ctx, owner, repo, issueNumber, &github.LockIssueOptions{})
+	if err != nil {
+		log.Printf("Error locking issue #%d: %v", issueNumber, err)
+		return
+	}
+
+	fmt.Printf("Locked issue #%d\n", issueNumber)
 }
 
 func parse(s string) (*IssueCloseInfo, error) {
@@ -175,6 +182,43 @@ type OpenAIClient struct {
 type ChatCompletionRequest struct {
 	Model    string        `json:"model"`
 	Messages []ChatMessage `json:"messages"`
+	ResponseFormat ResponseFormat  `json:"response_format"`
+}
+
+type ResponseFormat struct {
+	Type string `json:"type"`
+	JsonSchema JsonSchema `json:"json_schema"`
+}
+
+type JsonSchema struct {
+	Name string `json:"name"`
+	Strict bool `json:"strict"`
+	Schema Schema `json:"schema"`
+}
+
+type Schema struct {
+	Type string `json:"type"`
+	Properties Properties `json:"properties"`
+	Required []string `json:"required"`
+	AdditionalProperties bool `json:"additionalProperties"`
+}
+
+type Properties struct {
+	Close Close `json:"close"`
+	Lock  Lock  `json:"lock"`
+	Content Content `json:"content"`
+}
+
+type Close struct {
+	Type string `json:"type"`
+}
+
+type Lock struct {
+	Type string `json:"type"`
+}
+
+type Content struct {
+	Type string `json:"type"`
 }
 
 type ChatMessage struct {
@@ -184,7 +228,11 @@ type ChatMessage struct {
 
 type ChatCompletionResponse struct {
 	Choices []struct {
-		Message ChatMessage `json:"message"`
+		Message struct {
+			Content string `json:"content"`
+			Role    string `json:"role"`
+			Refusal bool   `json:"refusal"`
+		}
 	} `json:"choices"`
 }
 
@@ -213,6 +261,29 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, model string, m
 	reqBody := ChatCompletionRequest{
 		Model:    model,
 		Messages: messages,
+		ResponseFormat: ResponseFormat{
+			Type: "json_schema",
+			JsonSchema: JsonSchema{
+				Name: "response",
+				Strict: true,
+				Schema: Schema{
+					Type: "object",
+					Properties: Properties{
+						Close: Close{
+							Type: "boolean",
+						},
+						Lock: Lock{
+							Type: "boolean",
+						},
+						Content: Content{
+							Type: "string",
+						},
+					},
+					Required: []string{"close", "lock", "content"},
+					AdditionalProperties: false,
+				},
+			},
+		},
 	}
 
 	jsonBody, err := json.Marshal(reqBody)
@@ -268,23 +339,7 @@ func chat(s string, m string) (string, error) {
 	client := NewOpenAIClient(os.Getenv("API_URL"), os.Getenv("API_KEY"))
 
 	messages := []ChatMessage{
-		{Role: "system", Content: `You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if they align with the selected options or checkboxes in the issue template, especially focusing on the "Verify steps" section.
-
-Your response must be in JSON format only, with no additional text. The JSON should contain two fields:
-1. "close": a boolean indicating whether the issue should be closed (true) or not (false).
-2. "content": a string in Chinese explaining the reason for the decision.
-
-Example response format:
-{
-"close": true,
-"content": "该 issue 被关闭，因为验证步骤未完成。具体原因：..."
-}
-
-Consider all available information, not just the checkboxes. 
-
-If there's not enough information to make a determination, state that in your response.
-
-If the content involves abusive or inappropriate language, please close the issues`,
+		{Role: "system", Content: `You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if they align with the selected options or checkboxes in the issue template, especially focusing on the "Verify steps" section. Finally give the evaluation result, whether the issue should be closed, whether the issue needs to be locked, and the reasons in Chinese. Consider all available information, not just the checkboxes. If there's not enough information to make a determination, state that in your response. If the content involves abusive or inappropriate language, please lock the issues`,
 		},
 		{Role: "user", Content: s},
 	}
@@ -296,6 +351,10 @@ If the content involves abusive or inappropriate language, please close the issu
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		return "", err
+	}
+
+	if response.Choices[0].Message.Refusal {
+		return "", fmt.Errorf("Refusal")
 	}
 
 	return response.Choices[0].Message.Content, nil
