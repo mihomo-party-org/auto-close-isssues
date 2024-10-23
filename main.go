@@ -66,8 +66,8 @@ func init() {
 func main() {
 
 	c := fmt.Sprintf(`请分析以下 GitHub issue:
-标题: "%s"
-内容: "%s"`, issue.Title, issue.Body)
+	标题: "%s"
+	内容: "%s"`, issue.Title, issue.Body)
 
 	content1, err := chat(c, "gpt-4o-mini")
 	if err != nil {
