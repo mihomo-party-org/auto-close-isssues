@@ -13,11 +13,8 @@ jobs:
         runs-on: ubuntu-latest
         steps:
         - name: Auto Close Issue
-            uses: mihomo-party-org/auto-close-issue@main
+            uses: mihomo-party-org/auto-close-issues@main
             with:
-                title: ${{ github.event.issue.title }}
-                body: ${{ github.event.issue.body }}
-                number: ${{ github.event.issue.number }}
                 token: ${{ secrets.GITHUB_TOKEN }}
                 url: 'https://api.openai.com'
                 key: 'sk-xxxxxx'

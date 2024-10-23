@@ -24,8 +24,8 @@ import (
 var (
 	ctx    context.Context
 	client *github.Client
-	owner  = "mihomo-party-org"
-	repo   = "mihomo-party"
+	owner  string
+	repo   string
 	issue  IssueInfo
 	prompt string
 )
@@ -49,9 +49,11 @@ func init() {
 	)
 	tc := oauth2.NewClient(ctx, ts)
 	client = github.NewClient(tc)
+	githubRepo := strings.Split(os.Getenv("GITHUB_REPO"), "/")
+	owner, repo = githubRepo[0], githubRepo[1]
 	issueNumber, err := strconv.Atoi(os.Getenv("ISSUE_NUMBER"))
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalln(err)
 	}
 	issue = IssueInfo{
 		Title:  os.Getenv("ISSUE_TITLE"),
@@ -68,27 +70,25 @@ func main() {
 内容: "%s"`, issue.Title, issue.Body)
 
 	content1, err := chat(c, "gpt-4o-mini")
-	log.Println(content1)
 	if err != nil {
-		log.Println(err)
+		log.Fatalln(err)
 	}
 	gpt4omini, err := parse(content1)
 	if err != nil {
-		log.Println(err)
+		log.Fatalln(err)
 	}
 
 	content2, err := chat(c, "gpt-4o")
-	log.Println(content2)
 	if err != nil {
-		log.Println(err)
+		log.Fatalln(err)
 	}
 	gpt4o, err := parse(content2)
 	if err != nil {
-		log.Println(err)
+		log.Fatalln(err)
 	}
 
-	fmt.Println(gpt4omini)
-	fmt.Println(gpt4o)
+	fmt.Println(content1)
+	fmt.Println(content2)
 
 	if gpt4omini.Close && gpt4o.Close {
 		closeIssue(issue.Number, gpt4o.Content)
