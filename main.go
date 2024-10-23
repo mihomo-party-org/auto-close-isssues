@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,7 +26,14 @@ var (
 	client *github.Client
 	owner  = "mihomo-party-org"
 	repo   = "mihomo-party"
+	issue  IssueInfo
 )
+
+type IssueInfo struct {
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Number int    `json:"number"`
+}
 
 type IssueCloseInfo struct {
 	Close   bool   `json:"close"`
@@ -40,69 +48,57 @@ func init() {
 	)
 	tc := oauth2.NewClient(ctx, ts)
 	client = github.NewClient(tc)
+	issueNumber, err := strconv.Atoi(os.Getenv("ISSUE_NUMBER"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	issue = IssueInfo{
+		Title:  os.Getenv("ISSUE_TITLE"),
+		Body:   os.Getenv("ISSUE_BODY"),
+		Number: issueNumber,
+	}
+
 }
 
 func main() {
 
-	issues := getIssues(ctx)
-
-	for _, issue := range issues {
-
-		c := fmt.Sprintf(`请分析以下 GitHub issue:
+	c := fmt.Sprintf(`请分析以下 GitHub issue:
 标题: "%s"
-内容: "%s"
-请特别关注 "Verify steps" 部分，并判断用户填写的内容是否满足了这些步骤的要求。如果不满足，请提供一个 JSON 格式的回答，说明关闭该 issue 的理由。`, issue.GetTitle(), issue.GetBody())
+内容: "%s"`, issue.Title, issue.Body)
 
-		content1, err := chat(c, "gpt-4o-mini")
-		log.Println(content1)
-		if err != nil {
-			log.Println(err)
-		}
-		gpt4omini, err := parse(content1)
-		if err != nil {
-			log.Println(err)
-		}
-
-		content2, err := chat(c, "gpt-4o")
-		log.Println(content2)
-		if err != nil {
-			log.Println(err)
-		}
-		gpt4o, err := parse(content2)
-		if err != nil {
-			log.Println(err)
-		}
-
-		fmt.Println(gpt4omini)
-		fmt.Println(gpt4o)
-
-		if gpt4omini.Close && gpt4o.Close {
-			closeIssue(issue, gpt4o.Content)
-		}
-		if gpt4omini.Lock && gpt4o.Lock {
-			lockIssue(issue)
-		}
-	}
-
-}
-func getIssues(ctx context.Context) []*github.Issue {
-	issues, _, err := client.Issues.ListByRepo(ctx, owner, repo, &github.IssueListByRepoOptions{
-		State: "open",
-		ListOptions: github.ListOptions{
-			PerPage: 1,
-		},
-	})
+	content1, err := chat(c, "gpt-4o-mini")
+	log.Println(content1)
 	if err != nil {
-		log.Println("Error fetching issues: ", err)
-		return nil
+		log.Println(err)
+	}
+	gpt4omini, err := parse(content1)
+	if err != nil {
+		log.Println(err)
 	}
 
-	return issues
+	content2, err := chat(c, "gpt-4o")
+	log.Println(content2)
+	if err != nil {
+		log.Println(err)
+	}
+	gpt4o, err := parse(content2)
+	if err != nil {
+		log.Println(err)
+	}
+
+	fmt.Println(gpt4omini)
+	fmt.Println(gpt4o)
+
+	if gpt4omini.Close && gpt4o.Close {
+		closeIssue(issue.Number, gpt4o.Content)
+	}
+	if gpt4omini.Lock && gpt4o.Lock {
+		lockIssue(issue.Number)
+	}
+
 }
 
-func closeIssue(issue *github.Issue, s string) {
-	issueNumber := issue.GetNumber()
-
+func closeIssue(issueNumber int, s string) {
 	comment := &github.IssueComment{
 		Body: github.String(s),
 	}
@@ -126,9 +122,7 @@ func closeIssue(issue *github.Issue, s string) {
 	fmt.Printf("Closed issue #%d\n", issueNumber)
 }
 
-func lockIssue(issue *github.Issue) {
-	issueNumber := issue.GetNumber()
-
+func lockIssue(issueNumber int) {
 	_, err := client.Issues.Lock(ctx, owner, repo, issueNumber, &github.LockIssueOptions{})
 	if err != nil {
 		log.Printf("Error locking issue #%d: %v", issueNumber, err)
@@ -180,32 +174,32 @@ type OpenAIClient struct {
 }
 
 type ChatCompletionRequest struct {
-	Model    string        `json:"model"`
-	Messages []ChatMessage `json:"messages"`
-	ResponseFormat ResponseFormat  `json:"response_format"`
+	Model          string         `json:"model"`
+	Messages       []ChatMessage  `json:"messages"`
+	ResponseFormat ResponseFormat `json:"response_format"`
 }
 
 type ResponseFormat struct {
-	Type string `json:"type"`
+	Type       string     `json:"type"`
 	JsonSchema JsonSchema `json:"json_schema"`
 }
 
 type JsonSchema struct {
-	Name string `json:"name"`
-	Strict bool `json:"strict"`
+	Name   string `json:"name"`
+	Strict bool   `json:"strict"`
 	Schema Schema `json:"schema"`
 }
 
 type Schema struct {
-	Type string `json:"type"`
-	Properties Properties `json:"properties"`
-	Required []string `json:"required"`
-	AdditionalProperties bool `json:"additionalProperties"`
+	Type                 string     `json:"type"`
+	Properties           Properties `json:"properties"`
+	Required             []string   `json:"required"`
+	AdditionalProperties bool       `json:"additionalProperties"`
 }
 
 type Properties struct {
-	Close Close `json:"close"`
-	Lock  Lock  `json:"lock"`
+	Close   Close   `json:"close"`
+	Lock    Lock    `json:"lock"`
 	Content Content `json:"content"`
 }
 
@@ -264,7 +258,7 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, model string, m
 		ResponseFormat: ResponseFormat{
 			Type: "json_schema",
 			JsonSchema: JsonSchema{
-				Name: "response",
+				Name:   "response",
 				Strict: true,
 				Schema: Schema{
 					Type: "object",
@@ -279,7 +273,7 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, model string, m
 							Type: "string",
 						},
 					},
-					Required: []string{"close", "lock", "content"},
+					Required:             []string{"close", "lock", "content"},
 					AdditionalProperties: false,
 				},
 			},
@@ -339,8 +333,7 @@ func chat(s string, m string) (string, error) {
 	client := NewOpenAIClient(os.Getenv("API_URL"), os.Getenv("API_KEY"))
 
 	messages := []ChatMessage{
-		{Role: "system", Content: `You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if they align with the selected options or checkboxes in the issue template, especially focusing on the "Verify steps" section. Finally give the evaluation result, whether the issue should be closed, whether the issue needs to be locked, and the reasons in Chinese. Consider all available information, not just the checkboxes. If there's not enough information to make a determination, state that in your response. If the content involves abusive or inappropriate language, please lock the issues`,
-		},
+		{Role: "system", Content: `You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if they align with the selected options or checkboxes in the issue template, especially focusing on the "Verify steps" section. Finally give the evaluation result, whether the issue should be closed, whether the issue needs to be locked, and the reasons in Chinese. Consider all available information, not just the checkboxes. If there's not enough information to make a determination, state that in your response. If the content involves abusive or inappropriate language, please lock the issues`},
 		{Role: "user", Content: s},
 	}
 
