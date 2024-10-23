@@ -1,0 +1,53 @@
+name: "Auto Close Issue"
+branding:
+  icon: "check-circle"
+  color: "black"
+description: "Review and automatically close issues through OpenAI"
+inputs:
+  title:
+    description: "Issue title"
+    required: true
+    default: ${{ github.event.issue.title }}
+  body:
+    description: "Issue body"
+    required: true
+    default: ${{ github.event.issue.body }}
+  number:
+    description: "Issue number"
+    required: true
+    default: ${{ github.event.issue.number }}
+  token:
+    description: "GitHub token"
+    required: true
+    default: ${{ secrets.GITHUB_TOKEN }}
+  url:
+    description: "OpenAI API Base URL"
+    required: true
+    default: "https://api.openai.com"
+  key:
+    description: "OpenAI API Key"
+    required: true
+  prompt:
+    description: "OpenAI system prompt"
+    required: false
+    default: You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if they align with the selected options or checkboxes in the issue template, especially focusing on the "Verify steps" section. Finally give the evaluation result, whether the issue should be closed, whether the issue needs to be locked, and the reasons in Chinese. Consider all available information, not just the checkboxes. If there's not enough information to make a determination, state that in your response. If the content involves abusive or inappropriate language, please lock the issues
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: mihomo-party-org/auto-close-isssues
+    - uses: actions/setup-go@v5
+      with:
+        go-version: "1.23"
+    - run: go run main.go
+      shell: bash
+      env:
+        ISSUE_TITLE: ${{ inputs.title }}
+        ISSUE_BODY: ${{ inputs.body }}
+        ISSUE_NUMBER: ${{ inputs.number }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+        API_URL: ${{ inputs.url }}
+        API_KEY: ${{ inputs.key }}
+        SYSTEM_PROMPT: ${{ inputs.prompt }}

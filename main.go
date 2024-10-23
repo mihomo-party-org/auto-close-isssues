@@ -27,6 +27,7 @@ var (
 	owner  = "mihomo-party-org"
 	repo   = "mihomo-party"
 	issue  IssueInfo
+	prompt string
 )
 
 type IssueInfo struct {
@@ -57,7 +58,7 @@ func init() {
 		Body:   os.Getenv("ISSUE_BODY"),
 		Number: issueNumber,
 	}
-
+	prompt = os.Getenv("SYSTEM_PROMPT")
 }
 
 func main() {
@@ -333,7 +334,7 @@ func chat(s string, m string) (string, error) {
 	client := NewOpenAIClient(os.Getenv("API_URL"), os.Getenv("API_KEY"))
 
 	messages := []ChatMessage{
-		{Role: "system", Content: `You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if they align with the selected options or checkboxes in the issue template, especially focusing on the "Verify steps" section. Finally give the evaluation result, whether the issue should be closed, whether the issue needs to be locked, and the reasons in Chinese. Consider all available information, not just the checkboxes. If there's not enough information to make a determination, state that in your response. If the content involves abusive or inappropriate language, please lock the issues`},
+		{Role: "system", Content: prompt},
 		{Role: "user", Content: s},
 	}
 
