@@ -18,22 +18,29 @@ import (
 	"time"
 
 	"github.com/google/go-github/v66/github"
+	orderedmap "github.com/wk8/go-ordered-map/v2"
 	"golang.org/x/oauth2"
 )
 
 var (
-	ctx    context.Context
-	client *github.Client
-	owner  string
-	repo   string
-	issue  IssueInfo
-	prompt string
+	ctx           context.Context
+	client        *github.Client
+	owner         string
+	repo          string
+	issue         IssueInfo
+	prompt        string
+	models        []string
+	comment_model string
 )
 
 type IssueInfo struct {
 	Title  string `json:"title"`
 	Body   string `json:"body"`
 	Number int    `json:"number"`
+}
+
+type Contents struct {
+	Data *orderedmap.OrderedMap[string, IssueCloseInfo]
 }
 
 type IssueCloseInfo struct {
@@ -61,6 +68,15 @@ func init() {
 		Number: issueNumber,
 	}
 	prompt = os.Getenv("SYSTEM_PROMPT")
+
+	modelsEnv := strings.ReplaceAll(os.Getenv("MODELS"), " ", "")
+	if modelsEnv != "" {
+		models = strings.Split(modelsEnv, ",")
+	}
+	if len(models) == 0 {
+		models = []string{"gpt-4o", "gpt-4o-mini"}
+	}
+	comment_model = os.Getenv("COMMENT_MODEL")
 }
 
 func main() {
@@ -68,35 +84,60 @@ func main() {
 	c := fmt.Sprintf(`请分析以下 GitHub issue:
 	标题: "%s"
 	内容: "%s"`, issue.Title, issue.Body)
-
-	content1, err := chat(c, "gpt-4o-mini")
-	if err != nil {
-		log.Fatalln(err)
-	}
-	gpt4omini, err := parse(content1)
-	if err != nil {
-		log.Fatalln(err)
+	close := true
+	lock := true
+	contents := Contents{
+		Data: orderedmap.New[string, IssueCloseInfo](),
 	}
 
-	content2, err := chat(c, "gpt-4o")
-	if err != nil {
-		log.Fatalln(err)
-	}
-	gpt4o, err := parse(content2)
-	if err != nil {
-		log.Fatalln(err)
+	for _, model := range models {
+		content, err := chat(c, model)
+		if err != nil {
+			log.Fatalln(err)
+			continue
+		}
+		parsedContent, err := parse(content)
+		if err != nil {
+			log.Fatalln(err)
+			continue
+		}
+		contents.Data.Set(model, *parsedContent)
+
+		if !parsedContent.Close {
+			close = false
+		}
+		if !parsedContent.Lock {
+			lock = false
+		}
+		log.Printf(`
+Model: %s
+Content: %s
+Close: %t
+Lock: %t
+`, model, parsedContent.Content, parsedContent.Close, parsedContent.Lock)
 	}
 
-	fmt.Println(content1)
-	fmt.Println(content2)
+	if contents.Data.Len() != 0 {
 
-	if gpt4omini.Close && gpt4o.Close {
-		closeIssue(issue.Number, gpt4o.Content)
+		if close {
+			var comment string
+			if pair := contents.Data.Oldest(); pair != nil {
+				comment = pair.Value.Content
+			}
+			if comment_model != "" {
+				for pair := contents.Data.Oldest(); pair != nil; pair = pair.Next() {
+					if pair.Key == comment_model {
+						comment = pair.Value.Content
+						break
+					}
+				}
+			}
+			closeIssue(issue.Number, comment)
+		}
+		if lock {
+			lockIssue(issue.Number)
+		}
 	}
-	if gpt4omini.Lock && gpt4o.Lock {
-		lockIssue(issue.Number)
-	}
-
 }
 
 func closeIssue(issueNumber int, s string) {

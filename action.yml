@@ -39,14 +39,21 @@ inputs:
   prompt:
     description: "OpenAI system prompt"
     required: false
-    default: You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if it should be closed or lock. If you believe the issue should be closed, please provide a reason for your decision.
+    default: 'You are an AI assistant specialized in analyzing GitHub issues. Your task is to evaluate the title and body of a given issue and determine if it should be closed or lock. If you believe the issue should be closed, please provide a reason for your decision. The reply format is json, the example is: {"close":false,"lock":false,"content":"Close reason"}'
+  models:
+    description: "models"
+    required: false
+    default: "gpt-4o,gpt-4o-mini"
+  comment_model:
+    description: "comment model"
+    required: false
 
 runs:
   using: "composite"
   steps:
     - uses: actions/checkout@v4
       with:
-        repository: mihomo-party-org/auto-close-isssues
+        repository: mihomo-party-org/auto-close-issue
     - uses: actions/setup-go@v5
       with:
         go-version: "1.23"
